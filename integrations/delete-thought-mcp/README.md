@@ -1,5 +1,9 @@
 # Delete Thought MCP
 
+![Community Contribution](https://img.shields.io/badge/OB1_COMMUNITY-Approved_Contribution-2ea44f?style=for-the-badge&logo=github)
+
+**Created by [@txcfi-scott](https://github.com/txcfi-scott)**
+
 > Standalone MCP Edge Function that adds a `delete_thought` tool — hard-deletes a thought by UUID with a pre-flight fetch and a clear confirmation response.
 
 ## What It Does
