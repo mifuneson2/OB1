@@ -25,7 +25,9 @@ export default async function ThoughtDetailPage({
   const { apiKey } = await requireSessionOrRedirect();
   const session = await getSession();
   const excludeRestricted = !session.restrictedUnlocked;
-  const { id: thoughtId } = await params;
+  const { id } = await params;
+  const thoughtId = id.trim();
+  if (!thoughtId) notFound();
 
   let thought;
   try {
