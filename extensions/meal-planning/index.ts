@@ -23,9 +23,20 @@ app.post("*", async (c) => {
   }
 
 
-  const key = c.req.query("key") || c.req.header("x-access-key");
+  // Three accepted paths, in precedence order. Bearer exists because a Claude
+  // Managed Agents vault credential can ONLY inject `Authorization: Bearer` --
+  // it cannot add a query param or a custom header, so `?key=` is unreachable
+  // from a Managed Agent. The `?key=` and x-access-key paths remain because a
+  // Claude.ai custom connector has no way to send a header: its only auth
+  // options are the URL or a full OAuth flow.
+  //
+  // Fail closed: a request carrying none of the three, or an unset
+  // MCP_ACCESS_KEY, is rejected. These functions deploy with verify_jwt off,
+  // so this check is the only thing in front of a service-role Supabase client.
+  const bearer = c.req.header("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const key = (bearer ?? c.req.query("key") ?? c.req.header("x-access-key"))?.trim();
   const expected = Deno.env.get("MCP_ACCESS_KEY");
-  if (!key || key !== expected) {
+  if (!key || !expected || key !== expected) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 

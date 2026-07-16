@@ -21,9 +21,20 @@ import { createClient } from "@supabase/supabase-js";
 const app = new Hono();
 
 app.post("/mcp", async (c) => {
-  const key = c.req.query("key") || c.req.header("x-access-key");
+  // Three accepted paths, in precedence order. Bearer exists because a Claude
+  // Managed Agents vault credential can ONLY inject `Authorization: Bearer` --
+  // it cannot add a query param or a custom header, so `?key=` is unreachable
+  // from a Managed Agent. The `?key=` and x-access-key paths remain because a
+  // Claude.ai custom connector has no way to send a header: its only auth
+  // options are the URL or a full OAuth flow.
+  //
+  // Deliberately its own key, NOT MCP_ACCESS_KEY: this server is the reduced,
+  // household-member surface, so it must stay separately revocable from the
+  // full-access server. Fail closed if it is unset.
+  const bearer = c.req.header("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const key = (bearer ?? c.req.query("key") ?? c.req.header("x-access-key"))?.trim();
   const expected = Deno.env.get("MCP_HOUSEHOLD_ACCESS_KEY");
-  if (!key || key !== expected) {
+  if (!key || !expected || key !== expected) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
