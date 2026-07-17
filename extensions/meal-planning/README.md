@@ -179,7 +179,13 @@ Instead, mint a **JWT that carries the claim**, signed with your project's legac
 # Prompts for the JWT secret with echo off, then prints the JWT to sign with it.
 # The secret goes via the environment, never argv -- arguments are visible to
 # anyone who can run `ps`.
-read -rs -p "JWT secret: " JWT_SECRET && echo
+#
+# printf + `read -rs` rather than bash's `read -p`: -p means "read from a
+# coprocess" in zsh (the default shell on macOS), which fails with
+# "read: -p: no coprocess" and leaves the secret empty. This form works in both.
+printf "JWT secret: "
+read -rs JWT_SECRET
+echo
 
 JWT_SECRET="$JWT_SECRET" deno eval '
 import { create } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
