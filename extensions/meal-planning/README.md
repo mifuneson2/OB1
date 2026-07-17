@@ -187,7 +187,7 @@ printf "JWT secret: "
 read -rs JWT_SECRET
 echo
 
-JWT_SECRET="$JWT_SECRET" deno eval '
+JWT_SECRET="$JWT_SECRET" PROJECT_REF="<your-project-ref>" deno eval '
 import { create } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
 const key = await crypto.subtle.importKey(
   "raw", new TextEncoder().encode(Deno.env.get("JWT_SECRET") ?? ""),
@@ -195,8 +195,12 @@ const key = await crypto.subtle.importKey(
 );
 const now = Math.floor(Date.now() / 1000);
 console.log(await create({ alg: "HS256", typ: "JWT" }, {
-  role: "household_member",          // the claim the RLS policies match on
   iss: "supabase",
+  // Required. The API gateway checks this before PostgREST ever sees the
+  // token; omit it and every request fails with "Invalid API key" and the
+  // hint "This API key might also be owned by another Supabase project".
+  ref: Deno.env.get("PROJECT_REF"),
+  role: "household_member",          // the claim the RLS policies match on
   iat: now,
   exp: now + 60 * 60 * 24 * 365 * 5, // 5 years; re-mint to rotate
 }, key));
@@ -204,6 +208,8 @@ console.log(await create({ alg: "HS256", typ: "JWT" }, {
 
 unset JWT_SECRET
 ```
+
+These are the same five claims Supabase's own `anon` and `service_role` keys carry — decode one with `supabase projects api-keys` and compare if a token is ever rejected.
 
 The `role` claim is what matters: PostgREST reads it, enters the `household_member` role, and your policies finally apply. Treat the output like any other secret.
 
