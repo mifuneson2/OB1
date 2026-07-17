@@ -20,7 +20,12 @@ import { createClient } from "@supabase/supabase-js";
 
 const app = new Hono();
 
-app.post("/mcp", async (c) => {
+// Wildcard, not "/mcp": Supabase routes the whole function subtree here and
+// hands Hono the path WITH the function-name prefix (/meal-planning-shared-mcp),
+// so a literal "/mcp" route never matches and every request 404s before auth.
+// Matching on "*" keeps the route independent of the deployed function name --
+// the same reason every extension's index.ts mounts on "*".
+app.post("*", async (c) => {
   // Three accepted paths, in precedence order. Bearer exists because a Claude
   // Managed Agents vault credential can ONLY inject `Authorization: Bearer` --
   // it cannot add a query param or a custom header, so `?key=` is unreachable
@@ -216,6 +221,6 @@ app.post("/mcp", async (c) => {
   return transport.handleRequest(c);
 });
 
-app.get("/", (c) => c.json({ status: "ok", service: "Meal Planning (Shared)", version: "1.0.0" }));
+app.get("*", (c) => c.json({ status: "ok", service: "Meal Planning (Shared)", version: "1.0.0" }));
 
 Deno.serve(app.fetch);
