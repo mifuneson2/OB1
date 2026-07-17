@@ -137,7 +137,9 @@ app.post("/mcp", async (c) => {
   // Use SCOPED credentials — not the service role key
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_HOUSEHOLD_KEY")!, // Limited key
+    // Limited key. NOT SUPABASE_-prefixed: Supabase reserves that prefix and
+    // `secrets set` silently skips such names, so one can never hold a value.
+    Deno.env.get("HOUSEHOLD_SUPABASE_KEY")!,
   );
 
   const server = new McpServer(
@@ -235,7 +237,9 @@ openssl rand -hex 32
 
 # Set secrets
 supabase secrets set MCP_HOUSEHOLD_ACCESS_KEY=your-generated-shared-key
-supabase secrets set SUPABASE_HOUSEHOLD_KEY=your-limited-supabase-key  # LIMITED KEY
+supabase secrets set HOUSEHOLD_SUPABASE_KEY=your-limited-supabase-key  # LIMITED KEY
+# Not SUPABASE_-prefixed: `secrets set` silently skips names starting with
+# SUPABASE_, which is reserved for the variables Supabase injects itself.
 
 # Optional: Household ID for RLS
 SHARED_HOUSEHOLD_ID=uuid-here
@@ -279,7 +283,7 @@ openssl rand -hex 32
 
 # Set the shared server's secrets
 supabase secrets set MCP_HOUSEHOLD_ACCESS_KEY=generated-key-here
-supabase secrets set SUPABASE_HOUSEHOLD_KEY=household-scoped-api-key
+supabase secrets set HOUSEHOLD_SUPABASE_KEY=household-scoped-api-key
 
 # Deploy
 supabase functions deploy household-shared-mcp --no-verify-jwt

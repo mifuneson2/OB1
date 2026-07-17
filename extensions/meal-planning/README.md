@@ -208,13 +208,15 @@ You'll also need the `household_member` key from step 1. These are two different
 | Secret | What it is |
 |--------|-----------|
 | `MCP_HOUSEHOLD_ACCESS_KEY` | authenticates **callers to the MCP server** — this is what your household member puts in their client |
-| `SUPABASE_HOUSEHOLD_KEY` | the key the **server uses to reach the database** — the `household_member` key from step 1. Never shared with anyone. |
+| `HOUSEHOLD_SUPABASE_KEY` | the key the **server uses to reach the database** — the `household_member` key from step 1. Never shared with anyone. |
 
 ```bash
-supabase secrets set SUPABASE_HOUSEHOLD_KEY=<the household_member key from step 1>
+supabase secrets set HOUSEHOLD_SUPABASE_KEY=<the household_member key from step 1>
 ```
 
-If `SUPABASE_HOUSEHOLD_KEY` is unset, the server returns **HTTP 500** on every authenticated request (`supabaseKey is required`) — the key check passes first, so a 500 here means auth worked and this secret is missing. A 401 means the caller's `MCP_HOUSEHOLD_ACCESS_KEY` is wrong instead.
+> **Why not `SUPABASE_HOUSEHOLD_KEY`?** Supabase reserves the `SUPABASE_` prefix for the variables it injects itself, and `secrets set` **silently skips** any name that starts with it (`Env name cannot start with SUPABASE_, skipping`). A `SUPABASE_`-prefixed name can never hold a value, so don't "tidy" this one back into that shape.
+
+If `HOUSEHOLD_SUPABASE_KEY` is unset, the server returns **HTTP 500** on every authenticated request (`supabaseKey is required`) — the key check runs first, so a 500 here means auth worked and this secret is missing. A 401 means the caller's `MCP_HOUSEHOLD_ACCESS_KEY` is wrong instead.
 
 ### 3. Connect Your Household Member
 

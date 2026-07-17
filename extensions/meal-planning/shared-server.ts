@@ -45,7 +45,10 @@ app.post("*", async (c) => {
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_HOUSEHOLD_KEY")!,
+    // NOT "SUPABASE_HOUSEHOLD_KEY": Supabase reserves the SUPABASE_ prefix for
+    // the vars it injects itself, and `secrets set` silently skips any name
+    // starting with it -- so that name can never hold a value.
+    Deno.env.get("HOUSEHOLD_SUPABASE_KEY")!,
   );
 
   const server = new McpServer({ name: "meal-planning-shared", version: "1.0.0" });
