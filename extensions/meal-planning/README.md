@@ -158,31 +158,39 @@ Generate a shopping list for the week of March 17.
 
 The shared server gives household members limited access — they can view meal plans, browse recipes, and manage the shopping list without accessing your full Open Brain.
 
-### 1. Create a Household Member Role in Supabase
+### 1. Create the household_member key
 
-The RLS policies check for `auth.jwt() ->> 'role' = 'household_member'`. You need to create a JWT with this claim:
+The RLS policies grant household access on the condition `auth.jwt() ->> 'role' = 'household_member'`, so the shared server needs a key whose JWT carries exactly that claim.
 
-**Option A: Create a separate Supabase user for your spouse**
-1. Go to Supabase Dashboard → Authentication → Users
-2. Create a new user with your spouse's email
-3. In the SQL Editor, grant the household_member role:
+Running `schema.sql` already did half the work: it creates the `household_member` Postgres role, grants it to `authenticator`, and gives it read access to `recipes` and `meal_plans` plus read/update on `shopping_lists` — and nothing else. The role has to exist before any key can reference it, because PostgREST switches into the role named in the JWT's `role` claim.
 
-```sql
--- Create a custom claim for this user
-UPDATE auth.users
-SET raw_app_meta_data = jsonb_set(
-  COALESCE(raw_app_meta_data, '{}'),
-  '{role}',
-  '"household_member"'
-)
-WHERE email = 'spouse@example.com';
+Now mint the key: **Dashboard → Project Settings → API Keys → new secret key**, with its JWT template set to:
+
+```json
+{ "role": "household_member" }
 ```
 
-**Option B: Use a shared service account**
-1. Create a new Supabase API key in Settings → API with limited permissions
-2. This is simpler but less granular than per-user authentication
+The role becomes available as an option once `schema.sql` has run. Copy the value — Supabase shows it only once.
 
-For this guide, we'll use Option B (shared service account).
+> **⚠️ Do not use an ordinary secret key here.** Every Supabase secret key is minted from a JWT template, and the default is `{"role": "service_role"}` — which **bypasses RLS entirely**. Such a key makes the shared server work while handing it your whole database: the opposite of what this server is for. The name you give a key changes nothing; only its template does. You can tell them apart:
+>
+> ```bash
+> # Check secret_jwt_template -- {"role": "service_role"} is the wrong key.
+> supabase projects api-keys --project-ref <your-ref>
+> ```
+
+Prefer per-user auth over a shared key? That is a larger change than it looks. Supabase puts custom claims under `app_metadata`, so a signed-in user's `auth.jwt() ->> 'role'` returns `authenticated`, not `household_member`. You would need to rewrite the policies to read `auth.jwt() -> 'app_metadata' ->> 'role'` **and** replace this server's static key with a real session token.
+
+**Verify the boundary before handing anything to anyone** — this should return a count, then refuse:
+
+```sql
+BEGIN;
+SET LOCAL ROLE household_member;
+SET LOCAL request.jwt.claims = '{"role":"household_member"}';
+SELECT count(*) FROM meal_plans;   -- works
+SELECT count(*) FROM auth.users;   -- ERROR: permission denied
+ROLLBACK;
+```
 
 ### 2. Deploy the Shared Edge Function
 
@@ -195,11 +203,18 @@ Follow the [Deploy an Edge Function](../../primitives/deploy-edge-function/) gui
 | Server file | `shared-server.ts` (not `index.ts`) |
 | Access key secret name | `MCP_HOUSEHOLD_ACCESS_KEY` (not `MCP_ACCESS_KEY`) |
 
-You'll also need to set the household Supabase key:
+You'll also need the `household_member` key from step 1. These are two different secrets, and the near-identical names are easy to mix up:
+
+| Secret | What it is |
+|--------|-----------|
+| `MCP_HOUSEHOLD_ACCESS_KEY` | authenticates **callers to the MCP server** — this is what your household member puts in their client |
+| `SUPABASE_HOUSEHOLD_KEY` | the key the **server uses to reach the database** — the `household_member` key from step 1. Never shared with anyone. |
 
 ```bash
-supabase secrets set SUPABASE_HOUSEHOLD_KEY=household-scoped-api-key
+supabase secrets set SUPABASE_HOUSEHOLD_KEY=<the household_member key from step 1>
 ```
+
+If `SUPABASE_HOUSEHOLD_KEY` is unset, the server returns **HTTP 500** on every authenticated request (`supabaseKey is required`) — the key check passes first, so a 500 here means auth worked and this secret is missing. A 401 means the caller's `MCP_HOUSEHOLD_ACCESS_KEY` is wrong instead.
 
 ### 3. Connect Your Household Member
 
