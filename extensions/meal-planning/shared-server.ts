@@ -93,7 +93,9 @@ app.post("*", async (c) => {
         .order("day_of_week")
         .order("meal_type");
 
-      if (error) throw error;
+      // Supabase errors are plain objects, not Error instances -- throwing
+      // one raw reaches the user as the useless string "[object Object]".
+      if (error) throw new Error(error.message);
 
       return {
         content: [
@@ -136,7 +138,9 @@ app.post("*", async (c) => {
 
       const { data, error } = await query.order("name");
 
-      if (error) throw error;
+      // Supabase errors are plain objects, not Error instances -- throwing
+      // one raw reaches the user as the useless string "[object Object]".
+      if (error) throw new Error(error.message);
 
       return {
         content: [
@@ -163,9 +167,26 @@ app.post("*", async (c) => {
         .select("*")
         .eq("user_id", args.user_id)
         .eq("week_start", args.week_start)
-        .single();
+        // maybeSingle, not single: `single` treats "no row" as an error, and a
+        // week with no list is a normal answer, not a failure.
+        .maybeSingle();
 
-      if (error) throw error;
+      // Supabase errors are plain objects, not Error instances -- throwing one
+      // raw reaches the user as the useless string "[object Object]".
+      if (error) throw new Error(error.message);
+
+      if (!data) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `No shopping list found for the week of ${args.week_start}. ` +
+                `Note that week_start must be the Monday of the week, and a list ` +
+                `only exists once one has been generated for that week's meal plan.`,
+            },
+          ],
+        };
+      }
 
       return {
         content: [
@@ -193,9 +214,25 @@ app.post("*", async (c) => {
         .from("shopping_lists")
         .select("items")
         .eq("id", args.shopping_list_id)
-        .single();
+        // maybeSingle, not single: a missing list is a normal answer to report,
+        // not a PostgrestError to throw (see view_shopping_list).
+        .maybeSingle();
 
-      if (fetchError) throw fetchError;
+      // Supabase errors are plain objects, not Error instances -- throwing one
+      // raw reaches the user as the useless string "[object Object]".
+      if (fetchError) throw new Error(fetchError.message);
+
+      if (!list) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `No shopping list with id ${args.shopping_list_id}. ` +
+                `Use view_shopping_list to get the current list and its id.`,
+            },
+          ],
+        };
+      }
 
       // Update the specific item's purchased status
       const items = list.items as Array<{
@@ -205,6 +242,21 @@ app.post("*", async (c) => {
         purchased: boolean;
         recipe_id?: string;
       }>;
+
+      // Report an unmatched name instead of writing the list back untouched and
+      // reporting success -- silently doing nothing is worse than a clear miss.
+      if (!items.some((item) => item.name === args.item_name)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `No item named "${args.item_name}" on this list. ` +
+                `Items must match exactly. This list has: ` +
+                `${items.map((i) => i.name).join(", ")}.`,
+            },
+          ],
+        };
+      }
 
       const updatedItems = items.map((item) => {
         if (item.name === args.item_name) {
@@ -224,7 +276,9 @@ app.post("*", async (c) => {
         .select()
         .single();
 
-      if (error) throw error;
+      // Supabase errors are plain objects, not Error instances -- throwing
+      // one raw reaches the user as the useless string "[object Object]".
+      if (error) throw new Error(error.message);
 
       return {
         content: [

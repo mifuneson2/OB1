@@ -164,20 +164,42 @@ The RLS policies grant household access on the condition `auth.jwt() ->> 'role' 
 
 Running `schema.sql` already did half the work: it creates the `household_member` Postgres role, grants it to `authenticator`, and gives it read access to `recipes` and `meal_plans` plus read/update on `shopping_lists` — and nothing else. The role has to exist before any key can reference it, because PostgREST switches into the role named in the JWT's `role` claim.
 
-Now mint the key: **Dashboard → Project Settings → API Keys → new secret key**, with its JWT template set to:
-
-```json
-{ "role": "household_member" }
-```
-
-The role becomes available as an option once `schema.sql` has run. Copy the value — Supabase shows it only once.
-
-> **⚠️ Do not use an ordinary secret key here.** Every Supabase secret key is minted from a JWT template, and the default is `{"role": "service_role"}` — which **bypasses RLS entirely**. Such a key makes the shared server work while handing it your whole database: the opposite of what this server is for. The name you give a key changes nothing; only its template does. You can tell them apart:
+> **⚠️ A Secret Key from the dashboard will not work here.** Not "works but is weaker" — it defeats the entire point of this server. [Supabase's docs](https://supabase.com/docs/guides/api/api-keys) are explicit: *"Secret keys authorize access to your project's data via the built-in `service_role` Postgres role,"* which *"uses the `BYPASSRLS` attribute, skipping any and all Row Level Security policies you attach."* There is no option to give a Secret Key a different role, and naming one `..._household_key` changes nothing. Such a key makes this server work perfectly **while handing it your entire database** — every table, read and write. The failure is invisible: it looks exactly like success.
+>
+> Verify any key before trusting it — `secret_jwt_template` is the ground truth, not the name:
 >
 > ```bash
-> # Check secret_jwt_template -- {"role": "service_role"} is the wrong key.
 > supabase projects api-keys --project-ref <your-ref>
+> # {"role": "service_role"} => WRONG KEY, bypasses RLS
 > ```
+
+Instead, mint a **JWT that carries the claim**, signed with your project's legacy JWT secret (Dashboard → Project Settings → API → JWT Settings → JWT Secret). This is the same mechanism Supabase's own `anon` and `service_role` keys use — they are just JWTs whose `role` claim names a Postgres role, which PostgREST then enters via `SET ROLE`.
+
+```bash
+# Prompts for the JWT secret with echo off, then prints the JWT to sign with it.
+# The secret goes via the environment, never argv -- arguments are visible to
+# anyone who can run `ps`.
+read -rs -p "JWT secret: " JWT_SECRET && echo
+
+JWT_SECRET="$JWT_SECRET" deno eval '
+import { create } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
+const key = await crypto.subtle.importKey(
+  "raw", new TextEncoder().encode(Deno.env.get("JWT_SECRET") ?? ""),
+  { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"],
+);
+const now = Math.floor(Date.now() / 1000);
+console.log(await create({ alg: "HS256", typ: "JWT" }, {
+  role: "household_member",          // the claim the RLS policies match on
+  iss: "supabase",
+  iat: now,
+  exp: now + 60 * 60 * 24 * 365 * 5, // 5 years; re-mint to rotate
+}, key));
+'
+
+unset JWT_SECRET
+```
+
+The `role` claim is what matters: PostgREST reads it, enters the `household_member` role, and your policies finally apply. Treat the output like any other secret.
 
 Prefer per-user auth over a shared key? That is a larger change than it looks. Supabase puts custom claims under `app_metadata`, so a signed-in user's `auth.jwt() ->> 'role'` returns `authenticated`, not `household_member`. You would need to rewrite the policies to read `auth.jwt() -> 'app_metadata' ->> 'role'` **and** replace this server's static key with a real session token.
 
