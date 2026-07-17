@@ -173,7 +173,20 @@ Running `schema.sql` already did half the work: it creates the `household_member
 > # {"role": "service_role"} => WRONG KEY, bypasses RLS
 > ```
 
-Instead, mint a **JWT that carries the claim**, signed with your project's legacy JWT secret (Dashboard → Project Settings → API → JWT Settings → JWT Secret). This is the same mechanism Supabase's own `anon` and `service_role` keys use — they are just JWTs whose `role` claim names a Postgres role, which PostgREST then enters via `SET ROLE`.
+Instead, mint a **JWT that carries the claim**, signed with your project's legacy JWT secret. This is the same mechanism Supabase's own `anon` and `service_role` keys use — they are just JWTs whose `role` claim names a Postgres role, which PostgREST then enters via `SET ROLE`.
+
+Get the secret from **Dashboard → Project Settings → JWT Keys → `Legacy JWT Secret` tab → Reveal**. Precision matters here, because several nearby values look plausible and none of them work:
+
+| Where | What it is | Use it? |
+|-------|-----------|---------|
+| **Legacy JWT Secret** tab → Reveal | the shared secret | ✅ **this one** |
+| **JWT Signing Keys** tab → Key ID | a UUID identifying a key | ❌ not a secret |
+| **JWT Signing Keys** tab → current key | ECC (P-256); private half is not extractable | ❌ can't sign with it |
+| API Keys page | `anon` / `service_role` / `sb_secret_…` | ❌ these are keys *signed by* the secret, not the secret |
+
+If your project has migrated to JWT Signing Keys, the Legacy JWT Secret tab says it is *"used to **only verify** JSON Web Tokens."* **That is fine, and is exactly what this needs** — Supabase no longer *signs* with it, but it stays in the verification set, so tokens you sign with it are still accepted. That is also why your `anon` and `service_role` keys still work.
+
+> **Don't sanity-check the secret by verifying it against your `anon` key.** If the legacy key has ever been rotated (the JWT Signing Keys tab shows `Last rotated at`), `anon` was signed with the *older* secret and the check fails on a perfectly good value. Test against the real thing instead: mint the token, set it, and call a tool.
 
 ```bash
 # Prompts for the JWT secret with echo off, then prints the JWT to sign with it.
@@ -209,13 +222,19 @@ console.log(await create({ alg: "HS256", typ: "JWT" }, {
 unset JWT_SECRET
 ```
 
-These are the same five claims Supabase's own `anon` and `service_role` keys carry — decode one with `supabase projects api-keys` and compare if a token is ever rejected.
+These are the same five claims Supabase's own `anon` and `service_role` keys carry — decode one with `supabase projects api-keys` and compare if a token is ever rejected. All five are required; `ref` in particular is checked by the gateway before PostgREST ever runs.
 
 The `role` claim is what matters: PostgREST reads it, enters the `household_member` role, and your policies finally apply. Treat the output like any other secret.
 
+**This token goes in the `Authorization` header, never the `apikey` slot** — which is why `shared-server.ts` passes the *anon* key to `createClient` and the household JWT as an `Authorization` header. The two headers do different jobs: `apikey` identifies the project to the gateway and must be a key Supabase has registered, while `Authorization` carries the JWT that selects the role. `createClient(url, householdJwt)` sends the token as both, so the gateway rejects it as `Invalid API key` and the role claim is never read. The anon key is safe in that slot: it only opens the door — what's visible is decided by the JWT, and RLS still applies.
+
 Prefer per-user auth over a shared key? That is a larger change than it looks. Supabase puts custom claims under `app_metadata`, so a signed-in user's `auth.jwt() ->> 'role'` returns `authenticated`, not `household_member`. You would need to rewrite the policies to read `auth.jwt() -> 'app_metadata' ->> 'role'` **and** replace this server's static key with a real session token.
 
-**Verify the boundary before handing anything to anyone** — this should return a count, then refuse:
+### Confirm the boundary is real
+
+A working server proves nothing about the boundary: with a `service_role` key every tool behaves **identically** while RLS is bypassed entirely. Success is not evidence. Test the two halves separately.
+
+**1. The role's reach** — should return a count, then refuse:
 
 ```sql
 BEGIN;
@@ -225,6 +244,20 @@ SELECT count(*) FROM meal_plans;   -- works
 SELECT count(*) FROM auth.users;   -- ERROR: permission denied
 ROLLBACK;
 ```
+
+**2. That the server actually uses that role.** `service_role` bypasses RLS but *not* table grants, so revoking a grant breaks a real `household_member` connection and leaves a `service_role` one untouched:
+
+```sql
+REVOKE SELECT ON public.recipes FROM household_member;
+```
+
+Now call `view_recipes`. **It must fail** with `permission denied for table recipes`. If it still returns data, your key is `service_role` and the boundary does not exist. Restore immediately either way:
+
+```sql
+GRANT SELECT ON public.recipes TO household_member;
+```
+
+> **Operational note:** this token's life is tied to the legacy JWT secret. The JWT Signing Keys tab offers to **revoke** previously-used keys once their tokens expire — revoking the legacy HS256 key invalidates this token, along with your `anon` and `service_role` keys. Re-mint before revoking.
 
 ### 2. Deploy the Shared Edge Function
 

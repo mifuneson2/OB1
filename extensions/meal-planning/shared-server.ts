@@ -61,12 +61,33 @@ app.post("*", async (c) => {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
+  // Two headers, two different jobs -- which is why the household key is NOT
+  // the second createClient argument:
+  //
+  //   apikey        identifies the PROJECT and gets past the API gateway. It
+  //                 must be a key registered with Supabase; an arbitrary JWT,
+  //                 however well-formed and correctly signed, is rejected as
+  //                 "Invalid API key".
+  //   Authorization carries the JWT whose `role` claim PostgREST enters via
+  //                 SET ROLE. This is what makes the RLS policies match.
+  //
+  // createClient(url, key) sends `key` as BOTH, so a custom-role JWT passed
+  // there dies at the gateway before its role claim is ever read. The anon key
+  // is safe in the apikey slot: it only opens the door. What is actually
+  // visible is decided by the household JWT below, and RLS still applies.
+  //
+  // HOUSEHOLD_SUPABASE_KEY, not SUPABASE_HOUSEHOLD_KEY: Supabase reserves the
+  // SUPABASE_ prefix, and `secrets set` silently skips such names.
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    // NOT "SUPABASE_HOUSEHOLD_KEY": Supabase reserves the SUPABASE_ prefix for
-    // the vars it injects itself, and `secrets set` silently skips any name
-    // starting with it -- so that name can never hold a value.
-    Deno.env.get("HOUSEHOLD_SUPABASE_KEY")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    {
+      global: {
+        headers: {
+          Authorization: `Bearer ${Deno.env.get("HOUSEHOLD_SUPABASE_KEY")!}`,
+        },
+      },
+    },
   );
 
   const server = new McpServer({ name: "meal-planning-shared", version: "1.0.0" });
@@ -95,7 +116,10 @@ app.post("*", async (c) => {
 
       // Supabase errors are plain objects, not Error instances -- throwing
       // one raw reaches the user as the useless string "[object Object]".
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(
+        [error.message, error.hint, error.details, error.code]
+          .filter(Boolean).join(" | "),
+      );
 
       return {
         content: [
@@ -140,7 +164,10 @@ app.post("*", async (c) => {
 
       // Supabase errors are plain objects, not Error instances -- throwing
       // one raw reaches the user as the useless string "[object Object]".
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(
+        [error.message, error.hint, error.details, error.code]
+          .filter(Boolean).join(" | "),
+      );
 
       return {
         content: [
@@ -173,7 +200,10 @@ app.post("*", async (c) => {
 
       // Supabase errors are plain objects, not Error instances -- throwing one
       // raw reaches the user as the useless string "[object Object]".
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(
+        [error.message, error.hint, error.details, error.code]
+          .filter(Boolean).join(" | "),
+      );
 
       if (!data) {
         return {
@@ -220,7 +250,10 @@ app.post("*", async (c) => {
 
       // Supabase errors are plain objects, not Error instances -- throwing one
       // raw reaches the user as the useless string "[object Object]".
-      if (fetchError) throw new Error(fetchError.message);
+      if (fetchError) throw new Error(
+        [fetchError.message, fetchError.hint, fetchError.details, fetchError.code]
+          .filter(Boolean).join(" | "),
+      );
 
       if (!list) {
         return {
@@ -278,7 +311,10 @@ app.post("*", async (c) => {
 
       // Supabase errors are plain objects, not Error instances -- throwing
       // one raw reaches the user as the useless string "[object Object]".
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(
+        [error.message, error.hint, error.details, error.code]
+          .filter(Boolean).join(" | "),
+      );
 
       return {
         content: [
